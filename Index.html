@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Actuele Energie Spotprijzen</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-900 min-h-screen">
+
+    <div class="max-w-4xl mx-auto px-4 py-8">
+        <!-- Header -->
+        <header class="mb-8 text-center md:text-left">
+            <h1 class="text-3xl font-bold text-blue-900">Energie Spotprijzen</h1>
+            <p class="text-gray-600">Actuele marktprijzen inclusief btw (Nederland)</p>
+        </header>
+
+        <!-- Status & Current Prices -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+            <!-- Elektriciteit Nu -->
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-sm font-semibold uppercase tracking-wider text-gray-500">Stroom Nu</h2>
+                    <span class="p-2 bg-yellow-100 rounded-full">
+                        <svg class="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                    </span>
+                </div>
+                <div class="flex items-baseline gap-2">
+                    <span id="current-elec-price" class="text-4xl font-bold">--</span>
+                    <span class="text-gray-500 font-medium">per kWh</span>
+                </div>
+                <p id="current-hour" class="text-xs text-gray-400 mt-2">Laden...</p>
+            </div>
+
+            <!-- Gas Nu -->
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-sm font-semibold uppercase tracking-wider text-gray-500">Gas Vandaag</h2>
+                    <span class="p-2 bg-blue-100 rounded-full">
+                        <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z"></path></svg>
+                    </span>
+                </div>
+                <div class="flex items-baseline gap-2">
+                    <span id="current-gas-price" class="text-4xl font-bold">--</span>
+                    <span class="text-gray-500 font-medium">per m³</span>
+                </div>
+                <p class="text-xs text-gray-400 mt-2">Dagprijs incl. btw</p>
+            </div>
+        </div>
+
+        <!-- Grafiek -->
+        <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 mb-8">
+            <h3 class="text-lg font-semibold mb-6 text-gray-800 text-center md:text-left">Prijsverloop Elektriciteit (Vandaag)</h3>
+            <div class="h-64">
+                <canvas id="priceChart"></canvas>
+            </div>
+        </div>
+
+        <footer class="text-center text-xs text-gray-400 mt-12">
+            Data via EnergyZero API • Getoonde prijzen zijn inclusief 21% BTW • Geen rechten aan ontleend
+        </footer>
+    </div>
+
+    <script>
+        // Configuratie
+        const BTW = 1.21;
+        const ELEC_API = "https://api.energyzero.nl/v1/energyprices";
+        
+        async function fetchData() {
+            const today = new Date().toISOString().split('T')[0];
+            const startTime = `${today}T00:00:00.000Z`;
+            const endTime = `${today}T23:59:59.999Z`;
+
+            try {
+                // Fetch Elektriciteit
+                const resElec = await fetch(`${ELEC_API}?fromDate=${startTime}&toDate=${endTime}&interval=4&usageType=1&inclBtw=true`);
+                const dataElec = await resElec.json();
+
+                // Fetch Gas
+                const resGas = await fetch(`${ELEC_API}?fromDate=${startTime}&toDate=${endTime}&interval=4&usageType=2&inclBtw=true`);
+                const dataGas = await resGas.json();
+
+                updateUI(dataElec.Prices, dataGas.Prices);
+            } catch (error) {
+                console.error("Fout bij ophalen data:", error);
+                document.body.innerHTML += `<div class="fixed bottom-4 right-4 bg-red-500 text-white p-4 rounded">Fout bij laden data.</div>`;
+            }
+        }
+
+        function updateUI(elecPrices, gasPrices) {
+            const currentHour = new Date().getHours();
+            
+            // Huidige elektriciteitsprijs
+            const currentPriceObj = elecPrices.find(p => new Date(p.readingDate).getHours() === currentHour);
+            if (currentPriceObj) {
+                document.getElementById('current-elec-price').innerText = `€${currentPriceObj.price.toFixed(3)}`;
+                document.getElementById('current-hour').innerText = `Geldig van ${currentHour}:00 tot ${currentHour + 1}:00`;
+            }
+
+            // Huidige gasprijs (gas is meestal één prijs per dag in deze API)
+            if (gasPrices && gasPrices.length > 0) {
+                document.getElementById('current-gas-price').innerText = `€${gasPrices[0].price.toFixed(3)}`;
+            }
+
+            renderChart(elecPrices, currentHour);
+        }
+
+        function renderChart(prices, currentHour) {
+            const ctx = document.getElementById('priceChart').getContext('2d');
+            const labels = prices.map(p => `${new Date(p.readingDate).getHours()}:00`);
+            const data = prices.map(p => p.price);
+            
+            const backgroundColors = data.map((_, i) => i === currentHour ? 'rgba(59, 130, 246, 0.5)' : 'rgba(229, 231, 235, 0.5)');
+            const borderColors = data.map((_, i) => i === currentHour ? '#2563eb' : '#9ca3af');
+
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Prijs per kWh (€)',
+                        data: data,
+                        backgroundColor: backgroundColors,
+                        borderColor: borderColors,
+                        borderWidth: 1,
+                        borderRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { beginAtZero: false, grid: { display: false } },
+                        x: { grid: { display: false } }
+                    }
+                }
+            });
+        }
+
+        // Start applicatie
+        window.onload = fetchData;
+    </script>
+</body>
+</html>
